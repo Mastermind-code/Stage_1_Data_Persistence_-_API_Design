@@ -26,8 +26,8 @@ database.
 1. Clone the repository
 
 ```bash
-   git clone ___
-   cd ___
+   git clone https://github.com/Mastermind-code/Stage_1_Data_Persistence_-_API_Design.git
+   cd Stage_1_Data_Persistence_-_API_Design
 ```
 
 2. Create and activate virtual environment
