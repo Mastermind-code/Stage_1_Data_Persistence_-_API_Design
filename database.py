@@ -12,6 +12,7 @@ engine = create_engine(
     pool_recycle=300
 )
 
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 class Base(DeclarativeBase):
     pass
