@@ -4,7 +4,11 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, DeclarativeBase
 load_dotenv()
 DATABASE_URL = os.getenv("DATABASE_URL")
+<<<<<<< HEAD
 engine = create_engine(DATABASE_URL, connect_args={"sslmode": "require"}, pool_pre_ping=True)
+=======
+engine = create_engine(DATABASE_URL, connect_args={"sslmode": "require"})
+>>>>>>> 21329081192146ddaa08b5813ea7aad0a0ecbc11
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 
