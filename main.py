@@ -16,7 +16,11 @@ app.include_router(profiles_router)
 
 @app.on_event("startup")
 def startup_event():
-    Base.metadata.create_all(bind=engine)
+    try:
+        Base.metadata.create_all(bind=engine)
+        print("Database tables created successfully")
+    except Exception as e:
+        print(f"Database startup error: {e}")
 
 if __name__ == "__main__":
     import uvicorn
