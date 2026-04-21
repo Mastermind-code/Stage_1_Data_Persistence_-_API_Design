@@ -169,6 +169,29 @@ All errors follow this structure:
 }
 ```
 
+## New in Stage 2
+
+### Advanced Filtering
+
+`GET /api/profiles?gender=male&country_id=NG&min_age=25&sort_by=age&order=desc&page=1&limit=10`
+
+**Supported filters:** gender, age_group, country_id, min_age, max_age, min_gender_probability, min_country_probability
+
+**Sorting:** sort_by (age | created_at | gender_probability), order (asc | desc)
+
+**Pagination:** page (default: 1), limit (default: 10, max: 50)
+
+### Natural Language Search
+
+`GET /api/profiles/search?q=young males from nigeria`
+
+Supported patterns:
+
+- Gender: "males", "females"
+- Age groups: "child", "teenager", "adult", "senior", "young" (16-24)
+- Age ranges: "above 30", "under 25"
+- Country: "from nigeria", "from kenya"
+
 ## Author
 
 Adebowale Adam Adewale
