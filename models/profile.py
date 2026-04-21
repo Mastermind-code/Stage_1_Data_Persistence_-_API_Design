@@ -10,10 +10,10 @@ class Profile(Base):
     name = Column(String, nullable=False)
     gender = Column(String, nullable=False)
     gender_probability = Column(Float, nullable=False)
-    sample_size = Column(Integer, nullable=False)
     age = Column(Integer, nullable=False)
     age_group = Column(String, nullable=False)
-    country_id = Column(String, nullable=False)
+    country_id = Column(String(2), nullable=False)
+    country_name = Column(String, nullable=False)
     country_probability = Column(Float, nullable=False)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     
