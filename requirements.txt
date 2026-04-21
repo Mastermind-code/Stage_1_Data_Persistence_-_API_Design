@@ -21,3 +21,4 @@ typing_extensions==4.15.0
 uuid6==2025.0.1
 uuid7==0.1.0
 uvicorn==0.44.0
+pycountry==26.2.16
