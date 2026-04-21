@@ -12,8 +12,8 @@ async def fetch_user_data(name: str):
             if data.get("gender") is None or data.get("count", 0) == 0:
                 return None, "No prediction available for the provided name"
             gender_probability = data.get("probability", 0)
-            sample_size = data.get("count", 0)
-            return {'gender': data.get("gender"), 'gender_probability': gender_probability, 'sample_size': sample_size}, None
+            return {'gender': data.get("gender"), 'gender_probability': gender_probability
+                    }, None
         except httpx.HTTPStatusError as e:
             return None, f"Upstream API error: {e.response.status_code}"
         except (httpx.ConnectError, httpx.TimeoutException):

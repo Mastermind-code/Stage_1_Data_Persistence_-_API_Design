@@ -1,5 +1,5 @@
 import httpx
-
+import pycountry
 NATIONALIZE_URL = "https://api.nationalize.io"
 
 async def fetch_user_nationality(name: str):
@@ -14,7 +14,12 @@ async def fetch_user_nationality(name: str):
             
             countries = data.get("country")
             top_country = max(countries, key=lambda x: x.get("probability", 0))
-            return {'country_id': top_country['country_id'], 'country_probability': top_country['probability']}, None
+            country_code = top_country['country_id']
+            country = pycountry.countries.get(alpha_2=country_code)
+            country_name = country.name if country else country_code
+            return {'country_id': top_country['country_id'], 
+                    'country_name': country_name,
+                    'country_probability': top_country['probability']}, None
         except httpx.HTTPStatusError as e:
             return None, f"Upstream API error: {e.response.status_code}"
         except (httpx.ConnectError, httpx.TimeoutException):
