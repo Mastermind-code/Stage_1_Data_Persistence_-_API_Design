@@ -1,7 +1,11 @@
-from fastapi import APIRouter, Depends, HTTPException, Response
+from typing import Optional
+
+from fastapi import APIRouter, Depends, Query, Response
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
+
+from services.parser import parse_query
 from database import get_db
 from models.profile import Profile
 from services.genderize import fetch_user_data
@@ -17,10 +21,10 @@ def serialize_profile(profile):
         "name": profile.name,
         "gender": profile.gender,
         "gender_probability": profile.gender_probability,
-        "sample_size": profile.sample_size,
         "age": profile.age,
         "age_group": profile.age_group,
         "country_id": profile.country_id,
+        "country_name": profile.country_name,
         "country_probability": profile.country_probability,
         "created_at": profile.created_at.strftime("%Y-%m-%dT%H:%M:%SZ")
     }
@@ -88,12 +92,59 @@ async def create_profile(request: ProfileRequest, db: Session = Depends(get_db))
     "status": "success",
     "data": serialize_profile(new_profile)
 })
+@router.get("/api/profiles/search")
+async def search_profiles(
+    q: str = Query(..., min_length=1),
+    page: int = Query(1, ge=1),
+    limit: int = Query(10, ge=1, le=50),
+    db: Session = Depends(get_db)
+):
+    filters = parse_query(q)
+    
+    if filters is None:
+        return JSONResponse(status_code=422, content={
+            "status": "error",
+            "message": "Unable to interpret query"
+        })
+
+    query = db.query(Profile)
+
+    if filters.get("gender"):
+        query = query.filter(Profile.gender == filters["gender"])
+    if filters.get("age_group"):
+        query = query.filter(Profile.age_group == filters["age_group"])
+    if filters.get("country_id"):
+        query = query.filter(Profile.country_id == filters["country_id"])
+    if filters.get("min_age") is not None:
+        query = query.filter(Profile.age >= filters["min_age"])
+    if filters.get("max_age") is not None:
+        query = query.filter(Profile.age <= filters["max_age"])
+
+    total = query.count()
+    profiles = query.offset((page - 1) * limit).limit(limit).all()
+
+    return JSONResponse(status_code=200, content={
+        "status": "success",
+        "page": page,
+        "limit": limit,
+        "total": total,
+        "data": [serialize_profile(p) for p in profiles]
+    })
+
 
 @router.get('/api/profiles')
 async def list_profiles(
-    gender: str = None, 
-    country_id: str = None, 
-    age_group: str = None, 
+    gender: Optional[str] = None, 
+    country_id: Optional[str] = None, 
+    age_group: Optional[str] = None, 
+    min_age: Optional[int] = None,
+    max_age: Optional[int] = None,
+    min_gender_probability: Optional[float] = None,
+    min_country_probability: Optional[float] = None,
+    sort_by: str = Query("created_at", regex="^(age|created_at|gender_probability)$"),
+    order: str = Query("desc", regex="^(asc|desc)$"),
+    page: int = Query(1, ge=1),
+    limit: int = Query(10, ge=1, le=50),
     db: Session = Depends(get_db)
 ):
     query = db.query(Profile)
@@ -104,13 +155,32 @@ async def list_profiles(
         query = query.filter(Profile.country_id == country_id.upper())
     if age_group:
         query = query.filter(Profile.age_group == age_group.lower())
+    if min_age is not None:
+        query = query.filter(Profile.age >= min_age)
+    if max_age is not None:
+        query = query.filter(Profile.age <= max_age)
+    if min_gender_probability is not None:
+        query = query.filter(Profile.gender_probability >= min_gender_probability)
+    if min_country_probability is not None:
+        query = query.filter(Profile.country_probability >= min_country_probability)
+
+    sort_column = getattr(Profile, sort_by)
+    if order == "desc":
+        sort_column = sort_column.desc()
+    query = query.order_by(sort_column)
+
+    total_profiles = query.count()
+    query = query.offset((page - 1) * limit).limit(limit)
 
     profiles = query.all()
     return JSONResponse(status_code=200, content={
-        "status": "success",
-        'count': len(profiles), 
+        "status": "success", 
+        'total': total_profiles,
+        'limit': limit,
+        "page": page,
         "data": [serialize_profile(profile) for profile in profiles]
     })
+
 
 @router.get('/api/profiles/{profile_id}')
 async def get_profile(profile_id: str, db: Session = Depends(get_db)):
