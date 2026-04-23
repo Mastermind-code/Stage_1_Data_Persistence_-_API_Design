@@ -144,9 +144,10 @@ async def list_profiles(
     sort_by: str = Query("created_at", regex="^(age|created_at|gender_probability)$"),
     order: str = Query("desc", regex="^(asc|desc)$"),
     page: int = Query(1, ge=1),
-    limit: int = Query(10, ge=1, le=50),
+    limit: int = Query(10, ge=1),
     db: Session = Depends(get_db)
 ):
+    limit = min(limit, 50)
     query = db.query(Profile)
 
     if gender:
