@@ -8,13 +8,15 @@ from sqlalchemy.orm import Session
 from sqlalchemy import desc, asc
 from pydantic import BaseModel
 import asyncio
-
+from main import limiter
 from database import get_db
 from models.profile import Profile
 from services.parser import parse_query
 from services.genderize import fetch_user_data
 from services.agify import fetch_user_age
 from services.nationalize import fetch_user_nationality
+from middleware.auth import get_current_user, require_role
+
 
 router = APIRouter(prefix="/api/v1/profiles")
 
@@ -73,7 +75,8 @@ def get_paginated_data(query, page, limit, url_path="/api/v1/profiles"):
         "data": [serialize_profile(p) for p in profiles]
     }
 
-@router.post("", status_code=201)
+@router.post("", status_code=201, dependencies=[Depends(require_role("admin"))])
+@limiter.limit("60/minute")
 async def create_profile(request: ProfileRequest, db: Session = Depends(get_db)):
     formatted_name = request.name.strip().lower()
     if not formatted_name:
@@ -102,8 +105,10 @@ async def create_profile(request: ProfileRequest, db: Session = Depends(get_db))
     except Exception:
         return JSONResponse(status_code=500, content={"status": "error", "message": "Server error"})
 
-@router.get("")
+@router.get("", dependencies=[Depends(get_current_user)])
+@limiter.limit("60/minute")
 async def list_profiles(
+    request: Request,
     gender: Optional[str] = None, country_id: Optional[str] = None, age_group: Optional[str] = None,
     min_age: Optional[int] = None, max_age: Optional[int] = None,
     min_gender_probability: Optional[float] = None, min_country_probability: Optional[float] = None,
@@ -120,8 +125,9 @@ async def list_profiles(
     
     return get_paginated_data(query, page, limit)
 
-@router.get("/search")
-async def search_profiles(q: str = Query(..., min_length=1), page: int = Query(1, ge=1), limit: int = Query(10, ge=1, le=50), db: Session = Depends(get_db)):
+@router.get("/search", dependencies=[Depends(get_current_user)])
+@limiter.limit("60/minute")
+async def search_profiles(request: Request, q: str = Query(..., min_length=1), page: int = Query(1, ge=1), limit: int = Query(10, ge=1, le=50), db: Session = Depends(get_db)):
     filters = parse_query(q)
     if not filters:
         return JSONResponse(status_code=422, content={"status": "error", "message": "Unable to interpret query"})
@@ -136,8 +142,10 @@ async def search_profiles(q: str = Query(..., min_length=1), page: int = Query(1
     
     return get_paginated_data(query, page, limit, url_path="/api/v1/profiles/search")
 
-@router.get("/export")
+@router.get("/export", dependencies=[Depends(get_current_user)])
+@limiter.limit("60/minute")
 async def export_profiles(
+    request: Request,
     gender: Optional[str] = None,
     country_id: Optional[str] = None,
     age_group: Optional[str] = None,
@@ -170,14 +178,16 @@ async def export_profiles(
         headers={"Content-Disposition": f"attachment; filename=profiles_{timestamp}.csv"}
     )
 
-@router.get("/{profile_id}")
-async def get_profile(profile_id: str, db: Session = Depends(get_db)):
+@router.get("/{profile_id}", dependencies=[Depends(get_current_user)])
+@limiter.limit("60/minute")
+async def get_profile(request: Request, profile_id: str, db: Session = Depends(get_db)):
     p = db.query(Profile).filter(Profile.id == profile_id).first()
     if not p: return JSONResponse(status_code=404, content={"status": "error", "message": "Profile not found"})
     return {"status": "success", "data": serialize_profile(p)}
 
-@router.delete("/{profile_id}")
-async def delete_profile(profile_id: str, db: Session = Depends(get_db)):
+@router.delete("/{profile_id}", dependencies=[Depends(require_role("admin"))])
+@limiter.limit("60/minute")
+async def delete_profile(request: Request, profile_id: str, db: Session = Depends(get_db)):
     p = db.query(Profile).filter(Profile.id == profile_id).first()
     if not p: return JSONResponse(status_code=404, content={"status": "error", "message": "Profile not found"})
     db.delete(p)

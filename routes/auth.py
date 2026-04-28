@@ -1,5 +1,6 @@
 import os
 import httpx
+from main import limiter
 from fastapi import APIRouter, Depends,  Query, Response, Request
 from fastapi.responses import JSONResponse, RedirectResponse
 from sqlalchemy.orm import Session
@@ -19,7 +20,8 @@ REDIRECT_URI = os.getenv("REDIRECT_URI")
 WEB_PORTAL_URL = os.getenv("WEB_PORTAL_URL", "http://localhost:3000")
 
 @router.get("/github")
-async def github_login(code_challenge: Optional[str] = None):
+@limiter.limit("10/minute")
+async def github_login(request: Request, code_challenge: Optional[str] = None):
     """
     Redirects to GitHub. CLI sends code_challenge; Web Browser does not.
     """
@@ -30,7 +32,9 @@ async def github_login(code_challenge: Optional[str] = None):
     return RedirectResponse(url=url)
 
 @router.get("/github/callback")
+@limiter.limit("10/minute")
 async def github_callback(
+    request: Request,
     code: str, 
     code_verifier: Optional[str] = None, 
     db: Session = Depends(get_db)
@@ -124,6 +128,7 @@ async def github_callback(
         return response
 
 @router.post("/refresh")
+@limiter.limit("10/minute")
 async def refresh_token(request: Request, db: Session = Depends(get_db)):
     body = await request.json()
     token_str = body.get("refresh_token")
@@ -163,6 +168,7 @@ async def refresh_token(request: Request, db: Session = Depends(get_db)):
     }
 
 @router.post("/logout")
+@limiter.limit("10/minute")
 async def logout(request: Request, db: Session = Depends(get_db)):
     body = await request.json()
     token_str = body.get("refresh_token")

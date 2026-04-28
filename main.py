@@ -8,13 +8,11 @@ from fastapi.exceptions import HTTPException
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
-
+from limiter import limiter
 from routes.profiles import router as profiles_router
 from routes.auth import router as auth_router # Added Auth Router
 from database import engine, Base   
 
-# 1. Initialize Rate Limiter
-limiter = Limiter(key_func=get_remote_address)
 app = FastAPI(title="Insighta Labs+ API")
 
 # Setup Rate Limit State and Handler
@@ -24,7 +22,7 @@ async def rate_limit_handler(request, exc):
     return JSONResponse(
         status_code=429,
         content={"status": "error", "message": "Too many requests"}
-
+    )
 # 2. Setup Logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("insighta_logger")
