@@ -1,6 +1,6 @@
 import os
 import httpx
-from main import limiter
+from limiter import limiter
 from fastapi import APIRouter, Depends,  Query, Response, Request
 from fastapi.responses import JSONResponse, RedirectResponse
 from sqlalchemy.orm import Session

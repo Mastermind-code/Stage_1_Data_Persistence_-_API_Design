@@ -2,13 +2,13 @@ from datetime import datetime, timezone
 from typing import Optional
 import io
 import csv
-from fastapi import APIRouter, Depends, Query, Response
+from fastapi import APIRouter, Depends, Query, Request, Response
 from fastapi.responses import JSONResponse, StreamingResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import desc, asc
 from pydantic import BaseModel
 import asyncio
-from main import limiter
+from limiter import limiter
 from database import get_db
 from models.profile import Profile
 from services.parser import parse_query
@@ -77,8 +77,8 @@ def get_paginated_data(query, page, limit, url_path="/api/v1/profiles"):
 
 @router.post("", status_code=201, dependencies=[Depends(require_role("admin"))])
 @limiter.limit("60/minute")
-async def create_profile(request: ProfileRequest, db: Session = Depends(get_db)):
-    formatted_name = request.name.strip().lower()
+async def create_profile(request: Request, profile_data: ProfileRequest, db: Session = Depends(get_db)):
+    formatted_name = profile_data.name.strip().lower()
     if not formatted_name:
         return JSONResponse(status_code=400, content={"status": "error", "message": "Invalid name"})
     
