@@ -16,9 +16,18 @@ from services.genderize import fetch_user_data
 from services.agify import fetch_user_age
 from services.nationalize import fetch_user_nationality
 from middleware.auth import get_current_user, require_role
+from fastapi import Header
 
 
-router = APIRouter(prefix="/api/v1/profiles")
+
+def verify_api_version(x_api_version: str = Header(None)):
+    if x_api_version != "1":
+        return JSONResponse(status_code=400, content={
+            "status": "error",
+            "message": "API version header required"
+        })
+    
+router = APIRouter(prefix="/api/v1/profiles", dependencies=[Depends(verify_api_version)])
 
 class ProfileRequest(BaseModel):
     name: str
