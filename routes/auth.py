@@ -167,6 +167,32 @@ async def refresh_token(request: Request, db: Session = Depends(get_db)):
         "refresh_token": new_refresh
     }
 
+@router.get("/whoami")
+async def whoami(current_user: User = Depends(get_current_user)):
+    return {
+        "status": "success",
+        "data": {
+            "username": current_user.username,
+            "email": current_user.email,
+            "role": current_user.role,
+            "avatar_url": current_user.avatar_url
+        }
+    }
+    
+@router.get("/whoami")
+@limiter.limit("60/minute")
+async def whoami(request: Request, current_user: User = Depends(get_current_user)):
+    return {
+        "status": "success",
+        "data": {
+            "username": current_user.username,
+            "email": current_user.email,
+            "role": current_user.role,
+            "avatar_url": current_user.avatar_url
+        }
+    }
+
+
 @router.post("/logout")
 @limiter.limit("10/minute")
 async def logout(request: Request, db: Session = Depends(get_db)):
