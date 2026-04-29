@@ -30,6 +30,7 @@ async def github_login(request: Request, code_challenge: Optional[str] = None):
     url = f"https://github.com/login/oauth/authorize?client_id={CLIENT_ID}&redirect_uri={REDIRECT_URI}&scope=user:email"
     if code_challenge:
         url += f"&code_challenge={code_challenge}&code_challenge_method=S256"
+    
     return RedirectResponse(url=url)
 
 @router.get("/github/callback")
@@ -116,15 +117,18 @@ async def github_callback(
             "refresh_token": refresh_token_str
         }
     else:
-        # Web Browser Scenario: Set Cookie & Redirect
-        response = RedirectResponse(url=f"{WEB_PORTAL_URL}/dashboard")
+    # Web Browser Scenario: Redirect to portal with tokens in URL
+        IS_PRODUCTION = os.getenv("ENVIRONMENT", "development") == "production"
+        response = RedirectResponse(
+            url=f"{WEB_PORTAL_URL}/dashboard?access_token={access_token}&refresh_token={refresh_token_str}"
+        )
         response.set_cookie(
             key="access_token",
             value=access_token,
             httponly=True,
-            secure=True, # Set to False for local dev without HTTPS
+            secure=IS_PRODUCTION,
             samesite="lax",
-            max_age=180 # 3 mins
+            max_age=180
         )
         return response
 
