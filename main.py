@@ -10,7 +10,8 @@ from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 from limiter import limiter
 from routes.profiles import router as profiles_router
-from routes.auth import router as auth_router # Added Auth Router
+from routes.auth import router as auth_router
+from routes.admin import router as admin_router
 from database import engine, Base   
 
 app = FastAPI(title="Insighta Labs+ API")
@@ -64,6 +65,7 @@ async def http_exception_handler(request, exc):
 # 6. Register Routers
 app.include_router(profiles_router)
 app.include_router(auth_router)
+app.include_router(admin_router)
 
 @app.on_event("startup")
 def startup_event():
