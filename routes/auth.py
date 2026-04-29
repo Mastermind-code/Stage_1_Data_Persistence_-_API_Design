@@ -117,55 +117,67 @@ async def github_callback(
             "refresh_token": refresh_token_str
         }
     else:
-    # Web Browser Scenario: Redirect to portal with tokens in URL
+        # Web Browser Scenario: Set HTTP-only cookies, redirect cleanly (no tokens in URL)
         IS_PRODUCTION = os.getenv("ENVIRONMENT", "development") == "production"
-        response = RedirectResponse(
-            url=f"{WEB_PORTAL_URL}/dashboard?access_token={access_token}&refresh_token={refresh_token_str}"
-        )
-        response.set_cookie(
-            key="access_token",
-            value=access_token,
-            httponly=True,
-            secure=IS_PRODUCTION,
-            samesite="lax",
-            max_age=180
-        )
+        samesite = "none" if IS_PRODUCTION else "lax"
+        secure = IS_PRODUCTION
+        response = RedirectResponse(url=f"{WEB_PORTAL_URL}/dashboard")
+        response.set_cookie(key="access_token", value=access_token, httponly=True, secure=secure, samesite=samesite, max_age=180)
+        response.set_cookie(key="refresh_token", value=refresh_token_str, httponly=True, secure=secure, samesite=samesite, max_age=300)
+        # Non-httponly flag cookie so JS can detect an active session exists
+        response.set_cookie(key="has_session", value="true", httponly=False, secure=secure, samesite=samesite, max_age=300)
         return response
 
 @router.post("/refresh")
 @limiter.limit("10/minute")
 async def refresh_token(request: Request, db: Session = Depends(get_db)):
-    body = await request.json()
-    token_str = body.get("refresh_token")
-    
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+
+    # CLI sends token in body; web sends it via httponly cookie
+    token_str = body.get("refresh_token") or request.cookies.get("refresh_token")
+    is_web = not body.get("refresh_token") and bool(request.cookies.get("refresh_token"))
+
     # Find token in DB
     token = db.query(RefreshToken).filter(
         RefreshToken.token == token_str,
         RefreshToken.is_revoked == False
     ).first()
-    
+
     if not token or token.expires_at < datetime.now(timezone.utc):
         return JSONResponse(status_code=401, content={
             "status": "error",
             "message": "Invalid or expired refresh token"
         })
-    
+
     # Revoke old token
     token.is_revoked = True
     db.commit()
-    
+
     # Issue new pair
     user = db.query(User).filter(User.id == token.user_id).first()
     new_access = create_access_token(user.id, user.role)
     new_refresh = create_refresh_token()
-    
+
     db.add(RefreshToken(
         user_id=user.id,
         token=new_refresh,
         expires_at=datetime.now(timezone.utc) + timedelta(minutes=5)
     ))
     db.commit()
-    
+
+    if is_web:
+        IS_PRODUCTION = os.getenv("ENVIRONMENT", "development") == "production"
+        samesite = "none" if IS_PRODUCTION else "lax"
+        secure = IS_PRODUCTION
+        response = JSONResponse(content={"status": "success"})
+        response.set_cookie(key="access_token", value=new_access, httponly=True, secure=secure, samesite=samesite, max_age=180)
+        response.set_cookie(key="refresh_token", value=new_refresh, httponly=True, secure=secure, samesite=samesite, max_age=300)
+        response.set_cookie(key="has_session", value="true", httponly=False, secure=secure, samesite=samesite, max_age=300)
+        return response
+
     return {
         "status": "success",
         "access_token": new_access,
@@ -189,18 +201,25 @@ async def whoami(request: Request, current_user: User = Depends(get_current_user
 @router.post("/logout")
 @limiter.limit("10/minute")
 async def logout(request: Request, db: Session = Depends(get_db)):
-    body = await request.json()
-    token_str = body.get("refresh_token")
-    
-    token = db.query(RefreshToken).filter(
-        RefreshToken.token == token_str
-    ).first()
-    
-    if token:
-        token.is_revoked = True
-        db.commit()
-    
-    return JSONResponse(status_code=200, content={
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+
+    # CLI sends token in body; web sends it via httponly cookie
+    token_str = body.get("refresh_token") or request.cookies.get("refresh_token")
+
+    if token_str:
+        token = db.query(RefreshToken).filter(RefreshToken.token == token_str).first()
+        if token:
+            token.is_revoked = True
+            db.commit()
+
+    response = JSONResponse(status_code=200, content={
         "status": "success",
         "message": "Logged out successfully"
     })
+    response.delete_cookie("access_token")
+    response.delete_cookie("refresh_token")
+    response.delete_cookie("has_session")
+    return response
