@@ -11,6 +11,7 @@ from database import get_db
 from models.user import User
 from models.token import RefreshToken
 from services.auth import create_access_token, create_refresh_token
+from middleware.auth import get_current_user
 
 router = APIRouter(prefix="/api/v1/auth")
 

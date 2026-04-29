@@ -121,8 +121,8 @@ async def list_profiles(
     gender: Optional[str] = None, country_id: Optional[str] = None, age_group: Optional[str] = None,
     min_age: Optional[int] = None, max_age: Optional[int] = None,
     min_gender_probability: Optional[float] = None, min_country_probability: Optional[float] = None,
-    sort_by: str = Query("created_at", regex="^(age|created_at|gender_probability)$"),
-    order: str = Query("desc", regex="^(asc|desc)$"),
+    sort_by: str = Query("created_at", pattern="^(age|created_at|gender_probability)$"),
+    order: str = Query("desc", pattern="^(asc|desc)$"),
     page: int = Query(1, ge=1), limit: int = Query(10, ge=1, le=50),
     db: Session = Depends(get_db)
 ):
@@ -160,8 +160,8 @@ async def export_profiles(
     age_group: Optional[str] = None,
     min_age: Optional[int] = None,
     max_age: Optional[int] = None,
-    sort_by: str = Query("created_at", regex="^(age|created_at|gender_probability)$"),
-    order: str = Query("desc", regex="^(asc|desc)$"),
+    sort_by: str = Query("created_at", pattern="^(age|created_at|gender_probability)$"),
+    order: str = Query("desc", pattern="^(asc|desc)$"),
     db: Session = Depends(get_db)
 ):
     query = db.query(Profile)
