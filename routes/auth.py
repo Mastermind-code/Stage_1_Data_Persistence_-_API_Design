@@ -122,15 +122,11 @@ async def github_callback(
         samesite = "lax" if is_local_backend else "none"
         secure = not is_local_backend
 
-        # When the portal runs on localhost (local dev), cross-origin httponly cookies
-        # cannot be sent back in fetch requests due to browser restrictions.
-        # In that case we pass tokens via URL so local dev works.
-        # In production (portal deployed to HTTPS) cookies alone are used — no URL tokens.
-        is_portal_local = any(h in WEB_PORTAL_URL for h in ("localhost", "127.0.0.1"))
-        if is_portal_local:
-            redirect_url = f"{WEB_PORTAL_URL}/dashboard?access_token={access_token}&refresh_token={refresh_token_str}"
-        else:
-            redirect_url = f"{WEB_PORTAL_URL}/dashboard"
+        # Always pass tokens in URL — sessionStorage works reliably across origins.
+        # Relying on cross-origin httponly cookies fails because Vercel subdomains
+        # are treated as different sites (vercel.app is a public suffix), so browsers
+        # block cookies even with SameSite=None; Secure.
+        redirect_url = f"{WEB_PORTAL_URL}/dashboard?access_token={access_token}&refresh_token={refresh_token_str}"
 
         response = RedirectResponse(url=redirect_url)
         response.set_cookie(key="access_token", value=access_token, httponly=True, secure=secure, samesite=samesite, max_age=180)
