@@ -21,6 +21,10 @@ CLIENT_SECRET = os.getenv("GITHUB_CLIENT_SECRET")
 REDIRECT_URI = os.getenv("REDIRECT_URI")
 WEB_PORTAL_URL = os.getenv("WEB_PORTAL_URL", "http://localhost:3000")
 
+CLI_CLIENT_ID = os.getenv("GITHUB_CLI_CLIENT_ID")
+CLI_CLIENT_SECRET = os.getenv("GITHUB_CLI_CLIENT_SECRET")
+CLI_REDIRECT_URI = "http://localhost:8765"
+
 
 def _verify_pkce(code_verifier: str, code_challenge: str) -> bool:
     """SHA-256 PKCE: base64url(sha256(code_verifier)) must equal code_challenge."""
@@ -357,3 +361,108 @@ async def logout(request: Request, db: Session = Depends(get_db)):
     response.delete_cookie("refresh_token")
     response.delete_cookie("has_session")
     return response
+
+
+# ── CLI-specific OAuth endpoints ──────────────────────────────────────────────
+# Uses a separate GitHub OAuth App whose callback URL is http://localhost:8765.
+# The CLI calls /auth/cli/login to get the GitHub URL, opens it in the browser,
+# captures the code at localhost:8765, then calls /auth/cli/callback directly.
+
+@router.get("/cli/login")
+async def cli_login(code_challenge: str):
+    """Returns the GitHub OAuth URL for the CLI to open in the browser."""
+    state = create_state_token(code_challenge)
+    url = (
+        f"https://github.com/login/oauth/authorize"
+        f"?client_id={CLI_CLIENT_ID}"
+        f"&redirect_uri={CLI_REDIRECT_URI}"
+        f"&scope=user:email"
+        f"&state={state}"
+    )
+    return {"url": url}
+
+
+@router.get("/cli/callback")
+async def cli_callback(
+    code: str,
+    state: str,
+    code_verifier: str,
+    db: Session = Depends(get_db)
+):
+    """Exchanges the CLI OAuth code for tokens using CLI app credentials."""
+    state_payload = verify_state_token(state)
+    if not state_payload:
+        return JSONResponse(status_code=400, content={
+            "status": "error",
+            "message": "Invalid or expired state"
+        })
+
+    stored_challenge = state_payload.get("cc")
+    if stored_challenge and not _verify_pkce(code_verifier, stored_challenge):
+        return JSONResponse(status_code=400, content={
+            "status": "error",
+            "message": "PKCE verification failed"
+        })
+
+    async with httpx.AsyncClient() as client:
+        res = await client.post(
+            "https://github.com/login/oauth/access_token",
+            data={
+                "client_id": CLI_CLIENT_ID,
+                "client_secret": CLI_CLIENT_SECRET,
+                "code": code,
+                "redirect_uri": CLI_REDIRECT_URI,
+                "code_verifier": code_verifier,
+            },
+            headers={"Accept": "application/json"}
+        )
+        gh_data = res.json()
+        if "access_token" not in gh_data:
+            return JSONResponse(status_code=400, content={
+                "status": "error",
+                "message": "GitHub authentication failed"
+            })
+
+        user_res = await client.get(
+            "https://api.github.com/user",
+            headers={"Authorization": f"Bearer {gh_data['access_token']}"}
+        )
+        gh_user = user_res.json()
+
+    user = db.query(User).filter(User.github_id == str(gh_user["id"])).first()
+    if not user:
+        user = User(
+            github_id=str(gh_user["id"]),
+            username=gh_user["login"],
+            email=gh_user.get("email"),
+            avatar_url=gh_user.get("avatar_url"),
+            role="analyst"
+        )
+        db.add(user)
+    else:
+        user.last_login_at = datetime.utcnow()
+        user.avatar_url = gh_user.get("avatar_url")
+
+    db.commit()
+    db.refresh(user)
+
+    if not user.is_active:
+        return JSONResponse(status_code=403, content={
+            "status": "error",
+            "message": "Account is deactivated"
+        })
+
+    access_token = create_access_token(user.id, user.role)
+    refresh_token_str = create_refresh_token()
+    db.add(RefreshToken(
+        user_id=user.id,
+        token=refresh_token_str,
+        expires_at=datetime.utcnow() + timedelta(minutes=60)
+    ))
+    db.commit()
+
+    return {
+        "status": "success",
+        "access_token": access_token,
+        "refresh_token": refresh_token_str
+    }
