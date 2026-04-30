@@ -118,9 +118,10 @@ async def github_callback(
         }
     else:
         # Web Browser Scenario: Set HTTP-only cookies, redirect cleanly (no tokens in URL)
-        IS_PRODUCTION = os.getenv("ENVIRONMENT", "development") == "production"
-        samesite = "none" if IS_PRODUCTION else "lax"
-        secure = IS_PRODUCTION
+        # Detect production automatically: if the backend is not on localhost it must be deployed
+        is_local = request.url.hostname in ("localhost", "127.0.0.1")
+        samesite = "lax" if is_local else "none"
+        secure = not is_local
         response = RedirectResponse(url=f"{WEB_PORTAL_URL}/dashboard")
         response.set_cookie(key="access_token", value=access_token, httponly=True, secure=secure, samesite=samesite, max_age=180)
         response.set_cookie(key="refresh_token", value=refresh_token_str, httponly=True, secure=secure, samesite=samesite, max_age=300)
@@ -169,9 +170,9 @@ async def refresh_token(request: Request, db: Session = Depends(get_db)):
     db.commit()
 
     if is_web:
-        IS_PRODUCTION = os.getenv("ENVIRONMENT", "development") == "production"
-        samesite = "none" if IS_PRODUCTION else "lax"
-        secure = IS_PRODUCTION
+        is_local = request.url.hostname in ("localhost", "127.0.0.1")
+        samesite = "lax" if is_local else "none"
+        secure = not is_local
         response = JSONResponse(content={"status": "success"})
         response.set_cookie(key="access_token", value=new_access, httponly=True, secure=secure, samesite=samesite, max_age=180)
         response.set_cookie(key="refresh_token", value=new_refresh, httponly=True, secure=secure, samesite=samesite, max_age=300)
