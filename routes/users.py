@@ -14,6 +14,7 @@ async def get_me(request: Request, current_user: User = Depends(get_current_user
         "status": "success",
         "data": {
             "id": current_user.id,
+            "github_id": current_user.github_id,
             "username": current_user.username,
             "email": current_user.email,
             "role": current_user.role,

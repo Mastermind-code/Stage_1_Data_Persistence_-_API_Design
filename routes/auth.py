@@ -91,7 +91,7 @@ async def github_callback(
         db.add(RefreshToken(
             user_id=test_admin.id,
             token=refresh_token_str,
-            expires_at=datetime.now(timezone.utc) + timedelta(minutes=60)
+            expires_at=datetime.utcnow() + timedelta(minutes=60)
         ))
         db.commit()
         return {
@@ -171,7 +171,7 @@ async def github_callback(
         )
         db.add(user)
     else:
-        user.last_login_at = datetime.now(timezone.utc)
+        user.last_login_at = datetime.utcnow()
         user.avatar_url = gh_user.get("avatar_url")
 
     db.commit()
@@ -189,7 +189,7 @@ async def github_callback(
     db.add(RefreshToken(
         user_id=user.id,
         token=refresh_token_str,
-        expires_at=datetime.now(timezone.utc) + timedelta(minutes=60)
+        expires_at=datetime.utcnow() + timedelta(minutes=60)
     ))
     db.commit()
 
@@ -238,7 +238,7 @@ async def refresh_token(request: Request, db: Session = Depends(get_db)):
         RefreshToken.is_revoked == False
     ).first()
 
-    if not token or token.expires_at < datetime.now(timezone.utc):
+    if not token or token.expires_at < datetime.utcnow():
         return JSONResponse(status_code=401, content={
             "status": "error",
             "message": "Invalid or expired refresh token"
@@ -254,7 +254,7 @@ async def refresh_token(request: Request, db: Session = Depends(get_db)):
     db.add(RefreshToken(
         user_id=user.id,
         token=new_refresh,
-        expires_at=datetime.now(timezone.utc) + timedelta(minutes=60)
+        expires_at=datetime.utcnow() + timedelta(minutes=60)
     ))
     db.commit()
 
@@ -331,7 +331,17 @@ async def logout(request: Request, db: Session = Depends(get_db)):
     except Exception:
         body = {}
 
+    # Check for access token in header as well (used by CLI)
+    auth_header = request.headers.get("Authorization", "")
+    has_access_token = auth_header.startswith("Bearer ")
+
     token_str = body.get("refresh_token") or request.cookies.get("refresh_token")
+
+    if not token_str and not has_access_token:
+        return JSONResponse(status_code=401, content={
+            "status": "error",
+            "message": "Authentication required to logout"
+        })
 
     if token_str:
         token = db.query(RefreshToken).filter(RefreshToken.token == token_str).first()
