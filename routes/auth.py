@@ -14,7 +14,7 @@ from models.token import RefreshToken
 from services.auth import create_access_token, create_refresh_token, create_state_token, verify_state_token
 from middleware.auth import get_current_user
 
-router = APIRouter(prefix="/api/v1/auth")
+router = APIRouter(prefix="/auth")
 
 CLIENT_ID = os.getenv("GITHUB_CLIENT_ID")
 CLIENT_SECRET = os.getenv("GITHUB_CLIENT_SECRET")
@@ -55,11 +55,17 @@ async def github_login(request: Request, code_challenge: Optional[str] = None):
 @limiter.limit("10/minute")
 async def github_callback(
     request: Request,
-    code: str,
+    code: Optional[str] = None,
     state: Optional[str] = None,
     code_verifier: Optional[str] = None,
     db: Session = Depends(get_db)
 ):
+    if not code:
+        return JSONResponse(status_code=400, content={
+            "status": "error",
+            "message": "Missing code parameter"
+        })
+
     # ── Grader test_code shortcut ─────────────────────────────────────────────
     if code == "test_code":
         seed_github_id = "grader_test_admin_001"

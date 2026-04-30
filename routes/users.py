@@ -3,7 +3,7 @@ from limiter import limiter
 from models.user import User
 from middleware.auth import get_current_user
 
-router = APIRouter(prefix="/api/v1/users")
+router = APIRouter(prefix="/users")
 
 
 @router.get("/me")
