@@ -53,7 +53,7 @@ def apply_filters(query, gender, country_id, age_group, min_age, max_age, min_ge
         query = query.filter(Profile.country_probability >= min_country_prob)
     return query
 
-def get_paginated_data(query, page, limit, url_path="/api/v1/profiles"  # canonical path for links):
+def get_paginated_data(query, page, limit, url_path="/api/v1/profiles"):
     total = query.count()
     total_pages = (total + limit - 1) // limit
     profiles = query.offset((page - 1) * limit).limit(limit).all()
