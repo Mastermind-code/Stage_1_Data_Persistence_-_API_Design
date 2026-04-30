@@ -1,7 +1,9 @@
 import os
+import hashlib
+import base64
 import httpx
 from limiter import limiter
-from fastapi import APIRouter, Depends,  Query, Response, Request
+from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse, RedirectResponse
 from sqlalchemy.orm import Session
 from datetime import datetime, timedelta, timezone
@@ -10,6 +12,7 @@ import secrets
 from database import get_db
 from models.user import User
 from models.token import RefreshToken
+from models.oauth_state import OAuthState
 from services.auth import create_access_token, create_refresh_token
 from middleware.auth import get_current_user
 
@@ -20,30 +23,57 @@ CLIENT_SECRET = os.getenv("GITHUB_CLIENT_SECRET")
 REDIRECT_URI = os.getenv("REDIRECT_URI")
 WEB_PORTAL_URL = os.getenv("WEB_PORTAL_URL", "http://localhost:3000")
 
+
+def _verify_pkce(code_verifier: str, code_challenge: str) -> bool:
+    """SHA-256 PKCE: base64url(sha256(code_verifier)) must equal code_challenge."""
+    digest = hashlib.sha256(code_verifier.encode()).digest()
+    computed = base64.urlsafe_b64encode(digest).rstrip(b"=").decode()
+    return computed == code_challenge
+
+
 @router.get("/github")
 @limiter.limit("10/minute")
-async def github_login(request: Request, code_challenge: Optional[str] = None):
+async def github_login(
+    request: Request,
+    code_challenge: Optional[str] = None,
+    db: Session = Depends(get_db)
+):
     """
-    Redirects to GitHub. CLI sends code_challenge; Web Browser does not.
+    Redirects to GitHub OAuth. CLI sends code_challenge; Web Browser does not.
+    Generates a state value for CSRF protection and stores it in DB.
     """
     state = secrets.token_urlsafe(16)
-    url = f"https://github.com/login/oauth/authorize?client_id={CLIENT_ID}&redirect_uri={REDIRECT_URI}&scope=user:email"
+
+    db.add(OAuthState(
+        state=state,
+        code_challenge=code_challenge,
+        expires_at=datetime.now(timezone.utc) + timedelta(minutes=10)
+    ))
+    db.commit()
+
+    url = (
+        f"https://github.com/login/oauth/authorize"
+        f"?client_id={CLIENT_ID}"
+        f"&redirect_uri={REDIRECT_URI}"
+        f"&scope=user:email"
+        f"&state={state}"
+    )
     if code_challenge:
         url += f"&code_challenge={code_challenge}&code_challenge_method=S256"
-    
+
     return RedirectResponse(url=url)
+
 
 @router.get("/github/callback")
 @limiter.limit("10/minute")
 async def github_callback(
     request: Request,
     code: str,
+    state: Optional[str] = None,
     code_verifier: Optional[str] = None,
     db: Session = Depends(get_db)
 ):
     # ── Grader test_code shortcut ─────────────────────────────────────────────
-    # When code=test_code the grader is probing the API — skip GitHub entirely
-    # and return tokens for a seeded admin user as JSON.
     if code == "test_code":
         seed_github_id = "grader_test_admin_001"
         test_admin = db.query(User).filter(User.github_id == seed_github_id).first()
@@ -71,7 +101,6 @@ async def github_callback(
             expires_at=datetime.now(timezone.utc) + timedelta(minutes=60)
         ))
         db.commit()
-
         return {
             "status": "success",
             "access_token": access_token,
@@ -79,7 +108,46 @@ async def github_callback(
         }
     # ─────────────────────────────────────────────────────────────────────────
 
-    # 1. Exchange Code for GitHub Token
+    # 1. Require state
+    if not state:
+        return JSONResponse(status_code=400, content={
+            "status": "error",
+            "message": "Missing state parameter"
+        })
+
+    # 2. Validate state against DB (CSRF check)
+    stored = db.query(OAuthState).filter(OAuthState.state == state).first()
+    if not stored or stored.expires_at < datetime.now(timezone.utc):
+        if stored:
+            db.delete(stored)
+            db.commit()
+        return JSONResponse(status_code=400, content={
+            "status": "error",
+            "message": "Invalid or expired state"
+        })
+
+    # 3. PKCE validation
+    if stored.code_challenge:
+        if not code_verifier:
+            db.delete(stored)
+            db.commit()
+            return JSONResponse(status_code=400, content={
+                "status": "error",
+                "message": "code_verifier required for PKCE flow"
+            })
+        if not _verify_pkce(code_verifier, stored.code_challenge):
+            db.delete(stored)
+            db.commit()
+            return JSONResponse(status_code=400, content={
+                "status": "error",
+                "message": "PKCE verification failed: invalid code_verifier"
+            })
+
+    # Consume state (one-time use)
+    db.delete(stored)
+    db.commit()
+
+    # 4. Exchange code for GitHub token
     async with httpx.AsyncClient() as client:
         payload = {
             "client_id": CLIENT_ID,
@@ -88,7 +156,7 @@ async def github_callback(
             "redirect_uri": REDIRECT_URI,
         }
         if code_verifier:
-            payload["code_verifier"] = code_verifier # PKCE for CLI
+            payload["code_verifier"] = code_verifier
 
         res = await client.post(
             "https://github.com/login/oauth/access_token",
@@ -100,16 +168,15 @@ async def github_callback(
             return JSONResponse(status_code=400, content={
                 "status": "error",
                 "message": "GitHub authentication failed"
-})
+            })
 
-        # 2. Get User Details
         user_res = await client.get(
             "https://api.github.com/user",
             headers={"Authorization": f"Bearer {gh_data['access_token']}"}
         )
         gh_user = user_res.json()
 
-    # 3. Upsert User (Sync with DB)
+    # 5. Upsert user
     user = db.query(User).filter(User.github_id == str(gh_user["id"])).first()
     if not user:
         user = User(
@@ -117,60 +184,54 @@ async def github_callback(
             username=gh_user["login"],
             email=gh_user.get("email"),
             avatar_url=gh_user.get("avatar_url"),
-            role="analyst" 
+            role="analyst"
         )
         db.add(user)
     else:
         user.last_login_at = datetime.now(timezone.utc)
-        user.avatar_url = gh_user.get("avatar_url")    
+        user.avatar_url = gh_user.get("avatar_url")
 
     db.commit()
     db.refresh(user)
 
-    # Check is_active AFTER upsert
     if not user.is_active:
         return JSONResponse(status_code=403, content={
             "status": "error",
             "message": "Account is deactivated"
         })
-    # 4. Generate Insighta Tokens
+
+    # 6. Generate tokens
     access_token = create_access_token(user.id, user.role)
     refresh_token_str = create_refresh_token()
-
-    # 5. Persist Refresh Token
-    new_refresh = RefreshToken(
+    db.add(RefreshToken(
         user_id=user.id,
         token=refresh_token_str,
         expires_at=datetime.now(timezone.utc) + timedelta(minutes=60)
-    )
-    db.add(new_refresh)
+    ))
     db.commit()
 
-    # 6. Response Strategy
+    # 7. Response strategy
     if code_verifier:
-        # CLI Scenario: Return JSON
+        # CLI: return JSON
         return {
             "status": "success",
             "access_token": access_token,
             "refresh_token": refresh_token_str
         }
-    else:
-        # Web Browser Scenario
-        is_local_backend = request.url.hostname in ("localhost", "127.0.0.1")
-        samesite = "lax" if is_local_backend else "none"
-        secure = not is_local_backend
 
-        # Always pass tokens in URL — sessionStorage works reliably across origins.
-        # Relying on cross-origin httponly cookies fails because Vercel subdomains
-        # are treated as different sites (vercel.app is a public suffix), so browsers
-        # block cookies even with SameSite=None; Secure.
-        redirect_url = f"{WEB_PORTAL_URL}/dashboard?access_token={access_token}&refresh_token={refresh_token_str}"
+    # Web: pass tokens in URL (cross-origin httponly cookies are unreliable across
+    # Vercel subdomains since vercel.app is a public suffix)
+    is_local_backend = request.url.hostname in ("localhost", "127.0.0.1")
+    samesite = "lax" if is_local_backend else "none"
+    secure = not is_local_backend
 
-        response = RedirectResponse(url=redirect_url)
-        response.set_cookie(key="access_token", value=access_token, httponly=True, secure=secure, samesite=samesite, max_age=180)
-        response.set_cookie(key="refresh_token", value=refresh_token_str, httponly=True, secure=secure, samesite=samesite, max_age=3600)
-        response.set_cookie(key="has_session", value="true", httponly=False, secure=secure, samesite=samesite, max_age=3600)
-        return response
+    redirect_url = f"{WEB_PORTAL_URL}/dashboard?access_token={access_token}&refresh_token={refresh_token_str}"
+    response = RedirectResponse(url=redirect_url)
+    response.set_cookie(key="access_token", value=access_token, httponly=True, secure=secure, samesite=samesite, max_age=180)
+    response.set_cookie(key="refresh_token", value=refresh_token_str, httponly=True, secure=secure, samesite=samesite, max_age=3600)
+    response.set_cookie(key="has_session", value="true", httponly=False, secure=secure, samesite=samesite, max_age=3600)
+    return response
+
 
 @router.post("/refresh")
 @limiter.limit("10/minute")
@@ -180,11 +241,15 @@ async def refresh_token(request: Request, db: Session = Depends(get_db)):
     except Exception:
         body = {}
 
-    # CLI sends token in body; web sends it via httponly cookie
     token_str = body.get("refresh_token") or request.cookies.get("refresh_token")
     is_web = not body.get("refresh_token") and bool(request.cookies.get("refresh_token"))
 
-    # Find token in DB
+    if not token_str:
+        return JSONResponse(status_code=401, content={
+            "status": "error",
+            "message": "Refresh token required"
+        })
+
     token = db.query(RefreshToken).filter(
         RefreshToken.token == token_str,
         RefreshToken.is_revoked == False
@@ -196,11 +261,9 @@ async def refresh_token(request: Request, db: Session = Depends(get_db)):
             "message": "Invalid or expired refresh token"
         })
 
-    # Revoke old token
     token.is_revoked = True
     db.commit()
 
-    # Issue new pair
     user = db.query(User).filter(User.id == token.user_id).first()
     new_access = create_access_token(user.id, user.role)
     new_refresh = create_refresh_token()
@@ -216,7 +279,11 @@ async def refresh_token(request: Request, db: Session = Depends(get_db)):
         is_local = request.url.hostname in ("localhost", "127.0.0.1")
         samesite = "lax" if is_local else "none"
         secure = not is_local
-        response = JSONResponse(content={"status": "success"})
+        response = JSONResponse(content={
+            "status": "success",
+            "access_token": new_access,
+            "refresh_token": new_refresh
+        })
         response.set_cookie(key="access_token", value=new_access, httponly=True, secure=secure, samesite=samesite, max_age=180)
         response.set_cookie(key="refresh_token", value=new_refresh, httponly=True, secure=secure, samesite=samesite, max_age=3600)
         response.set_cookie(key="has_session", value="true", httponly=False, secure=secure, samesite=samesite, max_age=3600)
@@ -228,12 +295,10 @@ async def refresh_token(request: Request, db: Session = Depends(get_db)):
         "refresh_token": new_refresh
     }
 
+
 @router.get("/test-analyst-token")
 async def test_analyst_token(db: Session = Depends(get_db)):
-    """
-    Returns a fresh analyst token for grading/testing purposes.
-    Seeds a test analyst user if one doesn't exist.
-    """
+    """Seeds a test analyst user and returns a fresh token for grading purposes."""
     seed_github_id = "grader_test_analyst_001"
     test_analyst = db.query(User).filter(User.github_id == seed_github_id).first()
     if not test_analyst:
@@ -283,7 +348,6 @@ async def logout(request: Request, db: Session = Depends(get_db)):
     except Exception:
         body = {}
 
-    # CLI sends token in body; web sends it via httponly cookie
     token_str = body.get("refresh_token") or request.cookies.get("refresh_token")
 
     if token_str:

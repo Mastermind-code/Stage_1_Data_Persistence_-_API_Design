@@ -2,10 +2,9 @@ from datetime import datetime, timezone
 from typing import Optional
 import io
 import csv
-from fastapi import APIRouter, Depends, Query, Request, Response
+from fastapi import APIRouter, Depends, Query, Request, Response, HTTPException
 from fastapi.responses import JSONResponse, StreamingResponse
 from sqlalchemy.orm import Session
-from sqlalchemy import desc, asc
 from pydantic import BaseModel
 import asyncio
 from limiter import limiter
@@ -16,18 +15,9 @@ from services.genderize import fetch_user_data
 from services.agify import fetch_user_age
 from services.nationalize import fetch_user_nationality
 from middleware.auth import get_current_user, require_role
-from fastapi import Header
 
 
-
-def verify_api_version(x_api_version: str = Header(None)):
-    if x_api_version != "1":
-        return JSONResponse(status_code=400, content={
-            "status": "error",
-            "message": "API version header required"
-        })
-    
-router = APIRouter(prefix="/api/v1/profiles", dependencies=[Depends(verify_api_version)])
+router = APIRouter(prefix="/profiles")
 
 class ProfileRequest(BaseModel):
     name: str
@@ -63,7 +53,7 @@ def apply_filters(query, gender, country_id, age_group, min_age, max_age, min_ge
         query = query.filter(Profile.country_probability >= min_country_prob)
     return query
 
-def get_paginated_data(query, page, limit, url_path="/api/v1/profiles"):
+def get_paginated_data(query, page, limit, url_path="/api/v1/profiles"  # canonical path for links):
     total = query.count()
     total_pages = (total + limit - 1) // limit
     profiles = query.offset((page - 1) * limit).limit(limit).all()
