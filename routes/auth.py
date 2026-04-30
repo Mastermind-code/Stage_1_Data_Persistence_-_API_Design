@@ -117,15 +117,24 @@ async def github_callback(
             "refresh_token": refresh_token_str
         }
     else:
-        # Web Browser Scenario: Set HTTP-only cookies, redirect cleanly (no tokens in URL)
-        # Detect production automatically: if the backend is not on localhost it must be deployed
-        is_local = request.url.hostname in ("localhost", "127.0.0.1")
-        samesite = "lax" if is_local else "none"
-        secure = not is_local
-        response = RedirectResponse(url=f"{WEB_PORTAL_URL}/dashboard")
+        # Web Browser Scenario
+        is_local_backend = request.url.hostname in ("localhost", "127.0.0.1")
+        samesite = "lax" if is_local_backend else "none"
+        secure = not is_local_backend
+
+        # When the portal runs on localhost (local dev), cross-origin httponly cookies
+        # cannot be sent back in fetch requests due to browser restrictions.
+        # In that case we pass tokens via URL so local dev works.
+        # In production (portal deployed to HTTPS) cookies alone are used — no URL tokens.
+        is_portal_local = any(h in WEB_PORTAL_URL for h in ("localhost", "127.0.0.1"))
+        if is_portal_local:
+            redirect_url = f"{WEB_PORTAL_URL}/dashboard?access_token={access_token}&refresh_token={refresh_token_str}"
+        else:
+            redirect_url = f"{WEB_PORTAL_URL}/dashboard"
+
+        response = RedirectResponse(url=redirect_url)
         response.set_cookie(key="access_token", value=access_token, httponly=True, secure=secure, samesite=samesite, max_age=180)
         response.set_cookie(key="refresh_token", value=refresh_token_str, httponly=True, secure=secure, samesite=samesite, max_age=300)
-        # Non-httponly flag cookie so JS can detect an active session exists
         response.set_cookie(key="has_session", value="true", httponly=False, secure=secure, samesite=samesite, max_age=300)
         return response
 
