@@ -40,3 +40,26 @@ def verify_access_token(token: str):
         return payload
     except JWTError:
         return None
+
+
+# ── Stateless OAuth state tokens (CSRF + PKCE) ───────────────────────────────
+# Encodes state nonce + optional code_challenge as a short-lived signed JWT.
+# No DB table required — safe for serverless environments.
+
+def create_state_token(code_challenge: str | None = None) -> str:
+    expire = datetime.now(timezone.utc) + timedelta(minutes=10)
+    payload: dict = {"purpose": "oauth_state", "exp": expire}
+    if code_challenge:
+        payload["cc"] = code_challenge
+    return jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
+
+
+def verify_state_token(state_token: str) -> dict | None:
+    """Returns payload dict on success, None if invalid/expired."""
+    try:
+        payload = jwt.decode(state_token, SECRET_KEY, algorithms=[ALGORITHM])
+        if payload.get("purpose") != "oauth_state":
+            return None
+        return payload
+    except JWTError:
+        return None

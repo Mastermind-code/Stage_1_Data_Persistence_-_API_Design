@@ -12,7 +12,6 @@ from routes.auth import router as auth_router
 from routes.admin import router as admin_router
 from routes.users import router as users_router
 from database import engine, Base
-import models.oauth_state  # noqa: F401 — ensures OAuthState table is created on startup
 
 app = FastAPI(title="Insighta Labs+ API")
 

@@ -8,12 +8,10 @@ from fastapi.responses import JSONResponse, RedirectResponse
 from sqlalchemy.orm import Session
 from datetime import datetime, timedelta, timezone
 from typing import Optional
-import secrets
 from database import get_db
 from models.user import User
 from models.token import RefreshToken
-from models.oauth_state import OAuthState
-from services.auth import create_access_token, create_refresh_token
+from services.auth import create_access_token, create_refresh_token, create_state_token, verify_state_token
 from middleware.auth import get_current_user
 
 router = APIRouter(prefix="/api/v1/auth")
@@ -33,23 +31,12 @@ def _verify_pkce(code_verifier: str, code_challenge: str) -> bool:
 
 @router.get("/github")
 @limiter.limit("10/minute")
-async def github_login(
-    request: Request,
-    code_challenge: Optional[str] = None,
-    db: Session = Depends(get_db)
-):
+async def github_login(request: Request, code_challenge: Optional[str] = None):
     """
     Redirects to GitHub OAuth. CLI sends code_challenge; Web Browser does not.
-    Generates a state value for CSRF protection and stores it in DB.
+    State is a short-lived signed JWT — no DB table required (safe for serverless).
     """
-    state = secrets.token_urlsafe(16)
-
-    db.add(OAuthState(
-        state=state,
-        code_challenge=code_challenge,
-        expires_at=datetime.now(timezone.utc) + timedelta(minutes=10)
-    ))
-    db.commit()
+    state = create_state_token(code_challenge)
 
     url = (
         f"https://github.com/login/oauth/authorize"
@@ -115,37 +102,27 @@ async def github_callback(
             "message": "Missing state parameter"
         })
 
-    # 2. Validate state against DB (CSRF check)
-    stored = db.query(OAuthState).filter(OAuthState.state == state).first()
-    if not stored or stored.expires_at < datetime.now(timezone.utc):
-        if stored:
-            db.delete(stored)
-            db.commit()
+    # 2. Validate state JWT (CSRF check — stateless, no DB needed)
+    state_payload = verify_state_token(state)
+    if not state_payload:
         return JSONResponse(status_code=400, content={
             "status": "error",
             "message": "Invalid or expired state"
         })
 
     # 3. PKCE validation
-    if stored.code_challenge:
+    stored_challenge = state_payload.get("cc")
+    if stored_challenge:
         if not code_verifier:
-            db.delete(stored)
-            db.commit()
             return JSONResponse(status_code=400, content={
                 "status": "error",
                 "message": "code_verifier required for PKCE flow"
             })
-        if not _verify_pkce(code_verifier, stored.code_challenge):
-            db.delete(stored)
-            db.commit()
+        if not _verify_pkce(code_verifier, stored_challenge):
             return JSONResponse(status_code=400, content={
                 "status": "error",
                 "message": "PKCE verification failed: invalid code_verifier"
             })
-
-    # Consume state (one-time use)
-    db.delete(stored)
-    db.commit()
 
     # 4. Exchange code for GitHub token
     async with httpx.AsyncClient() as client:
