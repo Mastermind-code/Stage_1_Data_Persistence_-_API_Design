@@ -16,6 +16,10 @@ from middleware.auth import get_current_user
 
 router = APIRouter(prefix="/auth")
 
+# Always produce a naive UTC datetime (same as utcnow() but without the deprecation)
+def _utcnow():
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
 CLIENT_ID = os.getenv("GITHUB_CLIENT_ID")
 CLIENT_SECRET = os.getenv("GITHUB_CLIENT_SECRET")
 REDIRECT_URI = os.getenv("REDIRECT_URI")
@@ -95,7 +99,7 @@ async def github_callback(
         db.add(RefreshToken(
             user_id=test_admin.id,
             token=refresh_token_str,
-            expires_at=datetime.utcnow() + timedelta(minutes=60)
+            expires_at=_utcnow() + timedelta(minutes=60)
         ))
         db.commit()
         return {
@@ -175,7 +179,7 @@ async def github_callback(
         )
         db.add(user)
     else:
-        user.last_login_at = datetime.utcnow()
+        user.last_login_at = _utcnow()
         user.avatar_url = gh_user.get("avatar_url")
 
     db.commit()
@@ -193,7 +197,7 @@ async def github_callback(
     db.add(RefreshToken(
         user_id=user.id,
         token=refresh_token_str,
-        expires_at=datetime.utcnow() + timedelta(minutes=60)
+        expires_at=_utcnow() + timedelta(minutes=60)
     ))
     db.commit()
 
@@ -242,7 +246,7 @@ async def refresh_token(request: Request, db: Session = Depends(get_db)):
         RefreshToken.is_revoked == False
     ).first()
 
-    if not token or token.expires_at < datetime.utcnow():
+    if not token or token.expires_at < _utcnow():
         return JSONResponse(status_code=401, content={
             "status": "error",
             "message": "Invalid or expired refresh token"
@@ -258,7 +262,7 @@ async def refresh_token(request: Request, db: Session = Depends(get_db)):
     db.add(RefreshToken(
         user_id=user.id,
         token=new_refresh,
-        expires_at=datetime.utcnow() + timedelta(minutes=60)
+        expires_at=_utcnow() + timedelta(minutes=60)
     ))
     db.commit()
 
@@ -440,7 +444,7 @@ async def cli_callback(
         )
         db.add(user)
     else:
-        user.last_login_at = datetime.utcnow()
+        user.last_login_at = _utcnow()
         user.avatar_url = gh_user.get("avatar_url")
 
     db.commit()
@@ -457,7 +461,7 @@ async def cli_callback(
     db.add(RefreshToken(
         user_id=user.id,
         token=refresh_token_str,
-        expires_at=datetime.utcnow() + timedelta(minutes=60)
+        expires_at=_utcnow() + timedelta(minutes=60)
     ))
     db.commit()
 
