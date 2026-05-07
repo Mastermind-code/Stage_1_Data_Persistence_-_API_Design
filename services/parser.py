@@ -59,8 +59,9 @@ _AGE_RANGE_RE = re.compile(
     r"(?:aged?|ages?|between)?\s*(\d+)\s*[-\u2013\u2014to]+\s*(\d+)\s*(?:years?)?"
 )
 
-# "between X and Y" form — separate pattern to avoid capturing "to" dashes
-_BETWEEN_AND_RE = re.compile(r"between\s+(\d+)\s+and\s+(\d+)")
+# "between X and Y" or "between ages X and Y" — allows 0–2 optional words
+# between the keyword and the first number (e.g. "ages", "the ages of")
+_BETWEEN_AND_RE = re.compile(r"between\s+(?:\w+\s+){0,2}(\d+)\s+and\s+(\d+)")
 
 # "above / over N"
 _ABOVE_RE = re.compile(r"(?:above|over)\s*(\d+)")
@@ -78,8 +79,8 @@ _COUNTRY_PREP_RE = re.compile(
 # Gender alias sets
 # ---------------------------------------------------------------------------
 
-_FEMALE_ALIASES = frozenset({"female", "women", "woman", "girl", "girls"})
-_MALE_ALIASES = frozenset({"men", "man", "boy", "boys", "male"})
+_FEMALE_ALIASES = frozenset({"female", "females", "women", "woman", "girl", "girls"})
+_MALE_ALIASES = frozenset({"male", "males", "men", "man", "boy", "boys"})
 
 # ---------------------------------------------------------------------------
 # Age-group keywords (checked in order; first match wins)
